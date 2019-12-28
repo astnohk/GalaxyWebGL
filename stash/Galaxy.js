@@ -36,8 +36,11 @@ class GalaxySimulator {
 		this.timeClock = null;
 
 		this.canvas = null;
-		this.context = null;
+		this.gl = null;
+		this.glBuffers = null;
+		this.programInfo = null;
 		this.zScale = 0.05;
+		this.pointSize = 2.0;
 
 
 		this.cosmoSize = 800;
@@ -53,7 +56,7 @@ class GalaxySimulator {
 		this.BHCoreSize = 8;
 
 		this.m = 1.0;
-		this.particleNum = 3000;
+		this.particleNum = 14000;
 		this.particle = new Array(this.particleNum);
 
 
@@ -64,13 +67,18 @@ class GalaxySimulator {
 		};
 		this.displayOffset = {x: 0, y: 0, z: 0};
 		this.camera = {
-			pos: {x: 0.0, y: 0.0, z: 0.0},
+			pos: {x: 0.0, y: 0.0, z: -1600.0},
 			view: {
 				X: {x: 1.0, y: 0.0, z: 0.0},
-				Y: {x: 0.0, y: -1.0, z: 0.0},
-				Z: {x: 0.0, y: 0.0, z: -1.0}
+				Y: {x: 0.0, y: 1.0, z: 0.0},
+				Z: {x: 0.0, y: 0.0, z: 1.0}
 			},
 			F: 30
+		};
+		this.cameraRotation = {
+			x: 0,
+			y: 0,
+			z: 0,
 		};
 		this.rotDegree = 3600;
 		this.colormapQuantize = 200;
@@ -78,6 +86,31 @@ class GalaxySimulator {
 
 		this.prev_mouse = {x: 0, y: 0};
 		this.prev_touches = [];
+
+		this.vsSource = `
+		    attribute vec4 aVertexPosition;
+		    attribute vec4 aVertexColor;
+		    attribute float aPointSize;
+
+		    uniform mat4 uModelViewMatrix;
+		    uniform mat4 uProjectionMatrix;
+
+		    varying lowp vec4 vColor;
+
+		    void main(void) {
+			    vec4 pos = uProjectionMatrix * uModelViewMatrix * aVertexPosition;
+			    gl_Position = pos;
+			    gl_PointSize = aPointSize / pos.w ;
+			    vColor = aVertexColor;
+		    }
+		    `;
+		this.fsSource = `
+		    varying lowp vec4 vColor;
+
+		    void main(void) {
+			    gl_FragColor = vColor;
+		    }
+		    `;
 
 		// Initialize
 		this.init();
@@ -100,20 +133,106 @@ class GalaxySimulator {
 		// Set display offset
 		this.displayOffset.x = this.canvas.width / 2.0;
 		this.displayOffset.y = this.canvas.height / 2.0;
-		// Set camera position and view angle
-		this.camera.pos = {x: 0, y: 0, z: this.cosmoSize};
 
 		// Set initial position and velocity
 		this.initGalaxy();
+
+		// Initialize WebGL
+		this.gl = this.canvas.getContext("webgl") || this.canvas.getContext("experimental-webgl");
+		if (!this.gl) {
+			alert("Failed to initialize WebGL");
+		}
+
+		let shaderProgram = this.initShaderProgram(this.gl, this.vsSource, this.fsSource);
+		this.programInfo = {
+			shaderProgram: shaderProgram,
+			attribLocations: {
+				vertexPosition: this.gl.getAttribLocation(shaderProgram, 'aVertexPosition'),
+				vertexColor: this.gl.getAttribLocation(shaderProgram, 'aVertexColor'),
+				pointSize: this.gl.getAttribLocation(shaderProgram, 'aPointSize'),
+			},
+			uniformLocations: {
+				projectionMatrix: this.gl.getUniformLocation(shaderProgram, 'uProjectionMatrix'),
+				modelViewMatrix: this.gl.getUniformLocation(shaderProgram, 'uModelViewMatrix'),
+			},
+		};
+
+		this.glBuffers = this.initBuffers(this.gl); // Should be done after initGalaxy()
 
 		// Start loop
 		this.startLoop();
 	}
 
+	initBuffers(gl) {
+		let positionBuffer = gl.createBuffer();
+		gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+		gl.bufferData(
+		    gl.ARRAY_BUFFER,
+		    new Float32Array(this.BH.position.concat(this.particle.position)),
+		    gl.STATIC_DRAW);
+
+		let colorBuffer = gl.createBuffer();
+		gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
+		gl.bufferData(
+		    gl.ARRAY_BUFFER,
+		    new Float32Array(this.BH.color.concat(this.particle.color)),
+		    gl.STATIC_DRAW);
+
+		let pointSizes = new Array(this.BHNum + this.particleNum); 
+		let pointSizeBuffer = gl.createBuffer();
+		gl.bindBuffer(gl.ARRAY_BUFFER, pointSizeBuffer);
+		gl.bufferData(
+		    gl.ARRAY_BUFFER,
+		    new Float32Array(this.BH.pointSize.concat(this.particle.pointSize)),
+		    gl.STATIC_DRAW);
+
+		let indexBuffer = gl.createBuffer();
+		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+		gl.bufferData(
+		    gl.ELEMENT_ARRAY_BUFFER,
+		    new Uint16Array(this.BH.indice.concat(this.particle.indice)),
+		    gl.STATIC_DRAW);
+
+		return {
+			position: positionBuffer,
+			color: colorBuffer,
+			pointSize: pointSizeBuffer,
+			indices: indexBuffer,
+		    };
+	}
+
+	initShaderProgram(gl, vsSource, fsSource) {
+		let vertexShader = this.loadShader(gl, gl.VERTEX_SHADER, vsSource);
+		let fragmentShader = this.loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
+
+		let shaderProgram = gl.createProgram();
+		gl.attachShader(shaderProgram, vertexShader);
+		gl.attachShader(shaderProgram, fragmentShader);
+		gl.linkProgram(shaderProgram);
+
+		if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+			alert("Unable to initialize the shader program: " + gl.getProgramInfoLog(shaderProgram));
+			return null;
+		}
+		return shaderProgram;
+	}
+
+	loadShader(gl, type, source) {
+		let shader = gl.createShader(type);
+		gl.shaderSource(shader, source);
+		gl.compileShader(shader);
+		if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+			alert("Failed to compile the shader program: " + gl.getShaderInfoLog(shader));
+			gl.deleteShader(shader);
+			return null;
+		}
+		return shader;
+	}
+
 	startLoop()
 	{
 		let root = this;
-		this.timeClock = setInterval(function () { root.loop(); }, 25);
+		this.timeClock = setInterval(function () { root.loop(); }, 50);
 	}
 
 	prepareCanvas()
@@ -122,8 +241,11 @@ class GalaxySimulator {
 		this.canvas = document.createElement("canvas");
 		this.canvas.rootInstance = this;
 		this.canvas.id = "GalaxySimulatorMainPool";
-		this.canvas.style.width = "100%";
-		this.canvas.style.height = "100%";
+		this.canvas.style.top = "10px";
+		this.canvas.style.left = "10px";
+		let style = window.getComputedStyle(this.rootWindow);
+		this.canvas.style.width = parseInt(style.width, 10) - 20 + "px";
+		this.canvas.style.height = parseInt(style.height, 10) - 20 + "px";
 		this.rootWindow.appendChild(this.canvas);
 		this.canvas.addEventListener(
 		    "windowdrag",
@@ -141,7 +263,6 @@ class GalaxySimulator {
 		this.canvas.addEventListener("touchstart", function (e) { e.currentTarget.rootInstance.mouseClick(e); }, false);
 		this.canvas.addEventListener("touchmove", function (e) { e.currentTarget.rootInstance.mouseMove(e); }, false);
 		this.canvas.addEventListener("dblclick", function (e) { e.currentTarget.rootInstance.mouseDblClick(e); }, false);
-		this.context = this.canvas.getContext("2d");
 		// Initialize canvas size
 		let canvasStyle = window.getComputedStyle(this.canvas);
 		this.canvas.width = parseInt(canvasStyle.width, 10);
@@ -208,28 +329,52 @@ class GalaxySimulator {
 	initGalaxy() {
 		let velInitMaxBH = 12;
 		let torque = new Array(3);
+		this.BH = {
+			position: new Array(this.BHNum * 3),
+			velocity: new Array(this.BHNum * 3),
+			color: new Array(this.BHNum * 4),
+			pointSize: new Array(this.BHNum),
+			indice: new Array(this.BHNum),
+		};
 		for (let N = 0; N < this.BHNum; N++) {
-			this.BH[N] = {
-				position: {
-					x: this.cosmoSize * (Math.random() - 0.5),
-					y: this.cosmoSize * (Math.random() - 0.5),
-					z: this.cosmoSize * (Math.random() - 0.5)
-				},
-				velocity: {
-					x: velInitMaxBH * (Math.random() - 0.5),
-					y: velInitMaxBH * (Math.random() - 0.5),
-					z: velInitMaxBH * (Math.random() - 0.5)
-				}
-			    };
+			this.BH.position[N * 3 + 0] = this.cosmoSize * (Math.random() - 0.5);
+			this.BH.position[N * 3 + 1] = this.cosmoSize * (Math.random() - 0.5);
+			this.BH.position[N * 3 + 2] = this.cosmoSize * (Math.random() - 0.5);
+			this.BH.velocity[N * 3 + 0] = velInitMaxBH * (Math.random() - 0.5);
+			this.BH.velocity[N * 3 + 1] = velInitMaxBH * (Math.random() - 0.5);
+			this.BH.velocity[N * 3 + 2] = velInitMaxBH * (Math.random() - 0.5);
+			this.BH.color[N * 4 + 0] = Math.random();
+			this.BH.color[N * 4 + 1] = Math.random();
+			this.BH.color[N * 4 + 2] = Math.random();
+			this.BH.color[N * 4 + 3] = 1.0;
+			this.BH.pointSize[N] = 6000.0;
+			this.BH.indice[N] = N;
 			torque[N] = {X: {x: 1.0, y: 0.0, z: 0.0}, Y: {x: 0.0, y: 1.0, z: 0.0}, Z: {x: 0.0, y: 0.0, z: 1.0}};
 			torque[N] = this.rotXYZ(
 			    torque[N],
 			    2 * Math.PI * Math.random(),
 			    2 * Math.PI * Math.random());
 		}
+		this.particle = {
+			position: new Array(this.particleNum * 3),
+			velocity: new Array(this.particleNum * 3),
+			color: new Array(this.particleNum * 4),
+			pointSize: new Array(this.particleNum),
+			indice: new Array(this.particleNum),
+		};
 		for (let n = 0; n < this.particleNum; n++) {
 			let N = n % this.BHNum;
-			let p = this.BH[N].position;
+			this.particle.color[n * 4 + 0] = this.BH.color[N * 4 + 0] * 0.8;
+			this.particle.color[n * 4 + 1] = this.BH.color[N * 4 + 1] * 0.8;
+			this.particle.color[n * 4 + 2] = this.BH.color[N * 4 + 2] * 0.8;
+			this.particle.color[n * 4 + 3] = 1.0;
+			this.particle.pointSize[n] = 1500.0;
+			this.particle.indice[n] = this.BHNum + n;
+			let p = {
+				x: this.BH.position[N * 3 + 0],
+				y: this.BH.position[N * 3 + 1],
+				z: this.BH.position[N * 3 + 2],
+			};
 			let r_pre = {
 				x: this.galaxySize * (Math.random() - 0.5),
 				y: this.galaxySize * (Math.random() - 0.5),
@@ -250,19 +395,12 @@ class GalaxySimulator {
 			// v^2 = G M / r where v = r w
 			// v = sqrt(G M / r)
 			let vel = Math.sqrt(this.G * this.m_BH / r_abs);
-			this.particle[n] = {
-				position: {
-					x: p.x + r.x,
-					y: p.y + r.y,
-					z: p.z + r.z
-				},
-				velocity: {
-					x: vel * v_norm.x + this.BH[N].velocity.x,
-					y: vel * v_norm.y + this.BH[N].velocity.y,
-					z: vel * v_norm.z + this.BH[N].velocity.z
-				},
-				id: N
-			    };
+			this.particle.position[n * 3 + 0] = p.x + r.x;
+			this.particle.position[n * 3 + 1] = p.y + r.y;
+			this.particle.position[n * 3 + 2] = p.z + r.z;
+			this.particle.velocity[n * 3 + 0] = vel * v_norm.x + this.BH.velocity[N * 3 + 0];
+			this.particle.velocity[n * 3 + 1] = vel * v_norm.y + this.BH.velocity[N * 3 + 1];
+			this.particle.velocity[n * 3 + 2] = vel * v_norm.z + this.BH.velocity[N * 3 + 2];
 		}
 	}
 
@@ -283,7 +421,7 @@ class GalaxySimulator {
 		}
 		this.automation();
 		this.physics();
-		this.draw();
+		this.draw(this.gl, this.programInfo);
 		this.loopEnded = true;
 	}
 
@@ -308,11 +446,11 @@ class GalaxySimulator {
 			let d;
 			let Distance = this.chaseBHDistance;
 			Distance = this.chasingBHDistanceCurrent;
-			d = this.BH[N].position.x - this.camera.view.Z.x * this.chasingBHDistanceCurrent - this.camera.pos.x;
+			d = this.BH.position[N * 3 + 0] - this.camera.view.Z.x * this.chasingBHDistanceCurrent - this.camera.pos.x;
 			this.camera.pos.x += Math.sign(d) * Math.sqrt(Math.abs(d));
-			d = this.BH[N].position.y - this.camera.view.Z.y * this.chasingBHDistanceCurrent  - this.camera.pos.y;
+			d = this.BH.position[N * 3 + 1] - this.camera.view.Z.y * this.chasingBHDistanceCurrent  - this.camera.pos.y;
 			this.camera.pos.y += Math.sign(d) * Math.sqrt(Math.abs(d));
-			d = this.BH[N].position.z - this.camera.view.Z.z * this.chasingBHDistanceCurrent  - this.camera.pos.z;
+			d = this.BH.position[N * 3 + 2] - this.camera.view.Z.z * this.chasingBHDistanceCurrent  - this.camera.pos.z;
 			this.camera.pos.z += Math.sign(d) * Math.sqrt(Math.abs(d));
 		}
 	}
@@ -322,9 +460,9 @@ class GalaxySimulator {
 		for (let n = 0; n < this.particleNum; n++) {
 			let f = {x: 0, y: 0, z: 0};
 			for (let N = 0; N < this.BHNum; N++) {
-				let x = this.BH[N].position.x - this.particle[n].position.x;
-				let y = this.BH[N].position.y - this.particle[n].position.y;
-				let z = this.BH[N].position.z - this.particle[n].position.z;
+				let x = this.BH.position[N * 3 + 0] - this.particle.position[n * 3 + 0];
+				let y = this.BH.position[N * 3 + 1] - this.particle.position[n * 3 + 1];
+				let z = this.BH.position[N * 3 + 2] - this.particle.position[n * 3 + 2];
 				let one_div_r = Math.pow(Math.max(this.r_min, x * x + y * y + z * z), -1.5);
 				f.x += x * one_div_r;
 				f.y += y * one_div_r;
@@ -333,14 +471,14 @@ class GalaxySimulator {
 			f.x *= this.G * this.m_BH;
 			f.y *= this.G * this.m_BH;
 			f.z *= this.G * this.m_BH;
-			this.particle[n].velocity.x += f.x * this.dt;
-			this.particle[n].velocity.y += f.y * this.dt;
-			this.particle[n].velocity.z += f.z * this.dt;
+			this.particle.velocity[n * 3 + 0] += f.x * this.dt;
+			this.particle.velocity[n * 3 + 1] += f.y * this.dt;
+			this.particle.velocity[n * 3 + 2] += f.z * this.dt;
 		}
 		for (let n = 0; n < this.particleNum; n++) {
-			this.particle[n].position.x += this.particle[n].velocity.x * this.dt;
-			this.particle[n].position.y += this.particle[n].velocity.y * this.dt;
-			this.particle[n].position.z += this.particle[n].velocity.z * this.dt;
+			this.particle.position[n * 3 + 0] += this.particle.velocity[n * 3 + 0] * this.dt;
+			this.particle.position[n * 3 + 1] += this.particle.velocity[n * 3 + 1] * this.dt;
+			this.particle.position[n * 3 + 2] += this.particle.velocity[n * 3 + 2] * this.dt;
 		}
 		for (let N = 0; N < this.BHNum; N++) {
 			let f = {x: 0, y: 0, z: 0};
@@ -348,9 +486,9 @@ class GalaxySimulator {
 				if (N == N_o) {
 					continue;
 				}
-				let x = this.BH[N_o].position.x - this.BH[N].position.x;
-				let y = this.BH[N_o].position.y - this.BH[N].position.y;
-				let z = this.BH[N_o].position.z - this.BH[N].position.z;
+				let x = this.BH.position[N_o * 3 + 0] - this.BH.position[N * 3 + 0];
+				let y = this.BH.position[N_o * 3 + 1] - this.BH.position[N * 3 + 1];
+				let z = this.BH.position[N_o * 3 + 2] - this.BH.position[N * 3 + 2];
 				let one_div_r = Math.pow(Math.max(this.r_min, x * x + y * y + z * z), -1.5);
 				f.x += x * one_div_r;
 				f.y += y * one_div_r;
@@ -359,14 +497,14 @@ class GalaxySimulator {
 			f.x *= this.G * this.m_BH;
 			f.y *= this.G * this.m_BH;
 			f.z *= this.G * this.m_BH;
-			this.BH[N].velocity.x += f.x * this.dt;
-			this.BH[N].velocity.y += f.y * this.dt;
-			this.BH[N].velocity.z += f.z * this.dt;
+			this.BH.velocity[N * 3 + 0] += f.x * this.dt;
+			this.BH.velocity[N * 3 + 1] += f.y * this.dt;
+			this.BH.velocity[N * 3 + 2] += f.z * this.dt;
 		}
 		for (let N = 0; N < this.BHNum; N++) {
-			this.BH[N].position.x += this.BH[N].velocity.x * this.dt;
-			this.BH[N].position.y += this.BH[N].velocity.y * this.dt;
-			this.BH[N].position.z += this.BH[N].velocity.z * this.dt;
+			this.BH.position[N * 3 + 0] += this.BH.velocity[N * 3 + 0] * this.dt;
+			this.BH.position[N * 3 + 1] += this.BH.velocity[N * 3 + 1] * this.dt;
+			this.BH.position[N * 3 + 2] += this.BH.velocity[N * 3 + 2] * this.dt;
 		}
 	}
 
@@ -390,66 +528,122 @@ class GalaxySimulator {
 	viewModified()
 	{
 		let newWindowSize = {x: parseInt(this.rootWindowStyle.width, 10), y: parseInt(this.rootWindowStyle.height, 10)};
-		if (this.canvas.width != newWindowSize.x ||
+		/*if (this.canvas.width != newWindowSize.x ||
 		    this.canvas.height != newWindowSize.y) {
 			this.canvas.width = newWindowSize.x;
 			this.canvas.height = newWindowSize.y;
 			this.displayOffset.x = newWindowSize.x / 2;
 			this.displayOffset.y = newWindowSize.y / 2;
-		}
+		}*/
 	}
 
-	draw()
+	draw(gl, programInfo)
 	{
-		let drawArea = {left: 0, right: this.canvas.width, top: 0, bottom: this.canvas.height};
-		this.viewModified();
-		if (!this.overwriting) {
-			this.context.clearRect(0, 0, this.canvas.width, this.canvas.height);
+		gl.clearColor(0.0, 0.0, 0.0, 1.0); // Clear with black
+		gl.clearDepth(1.0); // Clear everything
+		gl.enable(gl.DEPTH_TEST); // Enable depth testing
+		gl.depthFunc(gl.LEQUAL); // Near things obscure far things
+		gl.clear(gl.COLOR_BUFFER_BIT | gl.DETPH_BUFFER_BIT);
+
+		let fieldOfView = 45 * Math.PI / 180.0;
+		let aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
+		let zNear = 0.1;
+		let zFar = 10000.0;
+		let projectionMatrix = mat4.create();
+
+		mat4.perspective(
+		    projectionMatrix,
+		    fieldOfView,
+		    aspect,
+		    zNear,
+		    zFar);
+
+		let modelViewMatrix = mat4.create();
+		let modelMatrix = mat4.create();
+		mat4.translate(modelMatrix, modelMatrix,
+		    [this.camera.pos.x, this.camera.pos.y, this.camera.pos.z]);
+		let viewMatrix = this.mat4CameraView();
+		mat4.multiply(modelViewMatrix, viewMatrix, modelMatrix);
+
+		{
+			let numComponents = 3;
+			let type = gl.FLOAT;
+			let normalize = false;
+			let stride = 0;
+			let offset = 0;
+			gl.bindBuffer(gl.ARRAY_BUFFER, this.glBuffers.position);
+			// Update positions
+			gl.bufferSubData(gl.ARRAY_BUFFER, 0, new Float32Array(this.BH.position));
+			gl.bufferSubData(gl.ARRAY_BUFFER, this.BHNum * 3 * 4, new Float32Array(this.particle.position));
+
+			gl.vertexAttribPointer(
+			    programInfo.attribLocations.vertexPosition,
+			    numComponents,
+			    type,
+			    normalize,
+			    stride,
+			    offset);
+			gl.enableVertexAttribArray(
+			    programInfo.attribLocations.vertexPosition);
 		}
-		if (this.view3D != 0) { // 3D view
-			let drawAreaL = {left: 0, right: Math.floor(this.canvas.width / 2), top: 0, bottom: this.canvas.height};
-			let drawAreaR = {left: Math.floor(this.canvas.width / 2 + 1), right: this.canvas.width, top: 0, bottom: this.canvas.height};
-			let displayOffsetL = {x: Math.floor(this.displayOffset.x / 2), y: this.displayOffset.y, z: 0};
-			let displayOffsetR = {x: Math.floor(this.displayOffset.x / 2) + drawAreaR.left, y: this.displayOffset.y, z: 0};
-			let cameraL = {
-				F: this.camera.F,
-				pos: {x: this.camera.pos.x, y: this.camera.pos.y, z: this.camera.pos.z},
-				view: {
-					X: {x: this.camera.view.X.x, y: this.camera.view.X.y, z: this.camera.view.X.z},
-					Y: {x: this.camera.view.Y.x, y: this.camera.view.Y.y, z: this.camera.view.Y.z},
-					Z: {x: this.camera.view.Z.x, y: this.camera.view.Z.y, z: this.camera.view.Z.z}
-				}
-			};
-			let cameraR = {
-				F: this.camera.F,
-				pos: {
-					x: this.camera.pos.x,
-					y: this.camera.pos.y,
-					z: this.camera.pos.z},
-				view: {
-					X: {x: this.camera.view.X.x, y: this.camera.view.X.y, z: this.camera.view.X.z},
-					Y: {x: this.camera.view.Y.x, y: this.camera.view.Y.y, z: this.camera.view.Y.z},
-					Z: {x: this.camera.view.Z.x, y: this.camera.view.Z.y, z: this.camera.view.Z.z}
-				}
-			};
-			if (this.view3D == 1) { // crossing view
-				cameraR.pos.x -= this.camera.view.X.x * this.eyesDistance;
-				cameraR.pos.y -= this.camera.view.X.y * this.eyesDistance;
-				cameraR.pos.z -= this.camera.view.X.z * this.eyesDistance;
-			} else { // parallel view
-				cameraR.pos.x += this.camera.view.X.x * this.eyesDistance;
-				cameraR.pos.y += this.camera.view.X.y * this.eyesDistance;
-				cameraR.pos.z += this.camera.view.X.z * this.eyesDistance;
-			}
-			this.drawParticle(cameraL, displayOffsetL, drawAreaL);
-			this.drawBH(cameraL, displayOffsetL, drawAreaL);
-			this.drawParticle(cameraR, displayOffsetR, drawAreaR);
-			this.drawBH(cameraR, displayOffsetR, drawAreaR);
-		} else {
-			this.drawParticle(this.camera, this.displayOffset, drawArea);
-			this.drawBH(this.camera, this.displayOffset, drawArea);
+		{
+			let numComponents = 4;
+			let type = gl.FLOAT;
+			let normalize = false;
+			let stride = 0;
+			let offset = 0;
+			gl.bindBuffer(gl.ARRAY_BUFFER, this.glBuffers.color);
+
+			gl.vertexAttribPointer(
+			    programInfo.attribLocations.vertexColor,
+			    numComponents,
+			    type,
+			    normalize,
+			    stride,
+			    offset);
+			gl.enableVertexAttribArray(
+			    programInfo.attribLocations.vertexColor);
 		}
-		this.drawXYZVector();
+		{
+			let numComponents = 1;
+			let type = gl.FLOAT;
+			let normalize = false;
+			let stride = 0;
+			let offset = 0;
+			gl.bindBuffer(gl.ARRAY_BUFFER, this.glBuffers.pointSize);
+			gl.bufferSubData(gl.ARRAY_BUFFER, 0, new Float32Array(this.BH.pointSize));
+			gl.bufferSubData(gl.ARRAY_BUFFER, this.BHNum * 4, new Float32Array(this.particle.pointSize));
+
+			gl.vertexAttribPointer(
+			    programInfo.attribLocations.pointSize,
+			    numComponents,
+			    type,
+			    normalize,
+			    stride,
+			    offset);
+			gl.enableVertexAttribArray(
+			    programInfo.attribLocations.pointSize);
+		}
+
+		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.glBuffers.indices);
+
+		gl.useProgram(programInfo.shaderProgram);
+		gl.uniformMatrix4fv(
+		    programInfo.uniformLocations.projectionMatrix,
+		    false,
+		    projectionMatrix);
+		gl.uniformMatrix4fv(
+		    programInfo.uniformLocations.modelViewMatrix,
+		    false,
+		    modelViewMatrix);
+
+		{
+			let vertexCount = this.BHNum + this.particleNum;
+			let type = gl.UNSIGNED_SHORT;
+			let offset = 0;
+			gl.drawElements(gl.POINTS, vertexCount, type, offset);
+			//gl.drawElements(gl.TRIANGLES, vertexCount, type, offset);
+		}
 	}
 
 	drawParticle(camera, offset, area)
@@ -596,6 +790,28 @@ class GalaxySimulator {
 		this.context.lineTo(xy.x, xy.y);
 		this.context.stroke();
 		this.context.lineWidth = 1;
+	}
+
+	mat4CameraView()
+	{
+		let view = mat4.create();
+		view[0]  = this.camera.view.X.x;
+		view[4]  = this.camera.view.X.y;
+		view[8]  = this.camera.view.X.z;
+		view[12] = 0;
+		view[1]  = this.camera.view.Y.x;
+		view[5]  = this.camera.view.Y.y;
+		view[9]  = this.camera.view.Y.z;
+		view[13] = 0;
+		view[2]  = this.camera.view.Z.x;
+		view[6]  = this.camera.view.Z.y;
+		view[10] = this.camera.view.Z.z;
+		view[14] = 0;
+		view[3]  = 0.0;
+		view[7]  = 0.0;
+		view[11] = 0.0;
+		view[15] = 1.0;
+		return view;
 	}
 
 	calcNormalVector(edges)
@@ -747,7 +963,7 @@ class GalaxySimulator {
 		    X: null,
 		    Y: null,
 		    Z: null};
-		XYZrotated = this.rotateXYZ(this.camera.view, y_axis, x_axis_p);
+		XYZrotated = this.rotateXYZ(this.camera.view, y_axis, -x_axis_p);
 		// Normalize
 		XYZrotated.X = this.normalizeVect(XYZrotated.X);
 		XYZrotated.Y = this.normalizeVect(XYZrotated.Y);
@@ -774,15 +990,15 @@ class GalaxySimulator {
 	{
 		this.camera.pos.x +=
 		    x * this.camera.view.X.x +
-		    y * this.camera.view.Y.x +
+		    -y * this.camera.view.Y.x +
 		    z * this.camera.view.Z.x;
 		this.camera.pos.y +=
 		    x * this.camera.view.X.y +
-		    y * this.camera.view.Y.y +
+		    -y * this.camera.view.Y.y +
 		    z * this.camera.view.Z.y;
 		this.camera.pos.z +=
 		    x * this.camera.view.X.z +
-		    y * this.camera.view.Y.z +
+		    -y * this.camera.view.Y.z +
 		    z * this.camera.view.Z.z;
 
 		this.chasingBHDistanceCurrent -= z;
