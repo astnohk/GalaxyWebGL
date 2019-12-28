@@ -56,7 +56,7 @@ class GalaxySimulator {
 		this.BHCoreSize = 8;
 
 		this.m = 1.0;
-		this.particleNum = 40000;
+		this.particleNum = 50000;
 		this.particle = new Array(this.particleNum);
 
 
@@ -232,7 +232,8 @@ class GalaxySimulator {
 	startLoop()
 	{
 		let root = this;
-		this.timeClock = setInterval(function () { root.loop(); }, 50);
+		//this.timeClock = setInterval(function () { root.loop(); }, 50);
+		root.loop();
 	}
 
 	prepareCanvas()
@@ -421,21 +422,23 @@ class GalaxySimulator {
 	// ----- Start Simulation -----
 	loop()
 	{
-		if (!this.loopEnded) {
-			return;
+		let root = this;
+		let render = function () {
+			if (root.BHNumChangeInvoked) {
+				root.BHNumChangeInvoked = false;
+				root.BHNumChange();
+			}
+			if (root.particleNumChangeInvoked) {
+				root.particleNumChangeInvoked = false;
+				root.particleNumChange();
+			}
+			root.automation();
+			root.physics();
+			root.draw(root.gl, root.programInfo);
+			root.loopEnded = true;
+			requestAnimationFrame(render);
 		}
-		if (this.BHNumChangeInvoked) {
-			this.BHNumChangeInvoked = false;
-			this.BHNumChange();
-		}
-		if (this.particleNumChangeInvoked) {
-			this.particleNumChangeInvoked = false;
-			this.particleNumChange();
-		}
-		this.automation();
-		this.physics();
-		this.draw(this.gl, this.programInfo);
-		this.loopEnded = true;
+		requestAnimationFrame(render);
 	}
 
 
