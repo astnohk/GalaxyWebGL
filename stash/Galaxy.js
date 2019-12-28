@@ -56,7 +56,7 @@ class GalaxySimulator {
 		this.BHCoreSize = 8;
 
 		this.m = 1.0;
-		this.particleNum = 14000;
+		this.particleNum = 40000;
 		this.particle = new Array(this.particleNum);
 
 
@@ -343,11 +343,14 @@ class GalaxySimulator {
 			this.BH.velocity[N * 3 + 0] = velInitMaxBH * (Math.random() - 0.5);
 			this.BH.velocity[N * 3 + 1] = velInitMaxBH * (Math.random() - 0.5);
 			this.BH.velocity[N * 3 + 2] = velInitMaxBH * (Math.random() - 0.5);
+			//this.BH.color[N * 4 + 0] = (1.0 + Math.random()) / 2.0;
+			//this.BH.color[N * 4 + 1] = (1.0 + Math.random()) / 2.0;
+			//this.BH.color[N * 4 + 2] = (1.0 + Math.random()) / 2.0;
 			this.BH.color[N * 4 + 0] = Math.random();
 			this.BH.color[N * 4 + 1] = Math.random();
 			this.BH.color[N * 4 + 2] = Math.random();
 			this.BH.color[N * 4 + 3] = 1.0;
-			this.BH.pointSize[N] = 6000.0;
+			this.BH.pointSize[N] = 7000.0;
 			this.BH.indice[N] = N;
 			torque[N] = {X: {x: 1.0, y: 0.0, z: 0.0}, Y: {x: 0.0, y: 1.0, z: 0.0}, Z: {x: 0.0, y: 0.0, z: 1.0}};
 			torque[N] = this.rotXYZ(
@@ -364,9 +367,19 @@ class GalaxySimulator {
 		};
 		for (let n = 0; n < this.particleNum; n++) {
 			let N = n % this.BHNum;
-			this.particle.color[n * 4 + 0] = this.BH.color[N * 4 + 0] * 0.8;
-			this.particle.color[n * 4 + 1] = this.BH.color[N * 4 + 1] * 0.8;
-			this.particle.color[n * 4 + 2] = this.BH.color[N * 4 + 2] * 0.8;
+			//this.particle.color[n * 4 + 0] = this.BH.color[N * 4 + 0] * 0.8;
+			//this.particle.color[n * 4 + 1] = this.BH.color[N * 4 + 1] * 0.8;
+			//this.particle.color[n * 4 + 2] = this.BH.color[N * 4 + 2] * 0.8;
+			this.particle.color[n * 4 + 0] = Math.min(this.BH.color[N * 4 + 0] * 1.2, 1.0);
+			this.particle.color[n * 4 + 1] = Math.min(this.BH.color[N * 4 + 1] * 1.2, 0.95);
+			this.particle.color[n * 4 + 2] = Math.min(this.BH.color[N * 4 + 2] * 1.2, 1.0);
+			let norm = Math.sqrt(
+			    this.BH.color[N * 4 + 0] * this.BH.color[N * 4 + 0] +
+			    this.BH.color[N * 4 + 1] * this.BH.color[N * 4 + 1] +
+			    this.BH.color[N * 4 + 2] * this.BH.color[N * 4 + 2]);
+			this.particle.color[n * 4 + 0] = this.BH.color[N * 4 + 0] / norm;
+			this.particle.color[n * 4 + 1] = this.BH.color[N * 4 + 1] / norm;
+			this.particle.color[n * 4 + 2] = this.BH.color[N * 4 + 2] / norm;
 			this.particle.color[n * 4 + 3] = 1.0;
 			this.particle.pointSize[n] = 1500.0;
 			this.particle.indice[n] = this.BHNum + n;
