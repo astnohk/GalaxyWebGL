@@ -51,7 +51,7 @@ class GalaxySimulator {
 		this.G = 6.67259e-11;
 
 		this.m_BH = 1.0e14;
-		this.BHNum = 7;
+		this.BHNum = 6;
 		this.BH = new Array(this.BHNum);
 		this.BHCoreSize = 8;
 
@@ -573,6 +573,9 @@ class GalaxySimulator {
 		    aspect,
 		    zNear,
 		    zFar);
+		// Not hiding if particles are on Z > 0
+		projectionMatrix[10] *= 0.1;
+		projectionMatrix[14] *= 0.1;
 
 		let modelViewMatrix = mat4.create();
 		let modelMatrix = mat4.create();
