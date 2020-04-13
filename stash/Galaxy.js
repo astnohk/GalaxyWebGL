@@ -87,15 +87,18 @@ class GalaxySimulator {
 		this.prev_mouse = {x: 0, y: 0};
 		this.prev_touches = [];
 
-		this.vsSource = `
-		    attribute vec4 aVertexPosition;
-		    attribute vec4 aVertexColor;
-		    attribute float aPointSize;
+		this.vsSource =
+		    `#version 300 es
+		    precision highp float;
+
+		    in vec4 aVertexPosition;
+		    in vec4 aVertexColor;
+		    in float aPointSize;
 
 		    uniform mat4 uModelViewMatrix;
 		    uniform mat4 uProjectionMatrix;
 
-		    varying lowp vec4 vColor;
+		    out lowp vec4 vColor;
 
 		    void main(void) {
 			    vec4 pos = uProjectionMatrix * uModelViewMatrix * aVertexPosition;
@@ -104,11 +107,15 @@ class GalaxySimulator {
 			    vColor = aVertexColor;
 		    }
 		    `;
-		this.fsSource = `
-		    varying lowp vec4 vColor;
+		this.fsSource =
+		    `#version 300 es
+		    precision highp float;
+
+		    in lowp vec4 vColor;
+		    out vec4 fragmentColor;
 
 		    void main(void) {
-			    gl_FragColor = vColor;
+			    fragmentColor = vColor;
 		    }
 		    `;
 
@@ -138,9 +145,9 @@ class GalaxySimulator {
 		this.initGalaxy();
 
 		// Initialize WebGL
-		this.gl = this.canvas.getContext("webgl") || this.canvas.getContext("experimental-webgl");
+		this.gl = this.canvas.getContext("webgl2", { antialias: false });
 		if (!this.gl) {
-			alert("Failed to initialize WebGL");
+			alert("Failed to initialize WebGL 2.0");
 		}
 
 		let shaderProgram = this.initShaderProgram(this.gl, this.vsSource, this.fsSource);
@@ -207,7 +214,9 @@ class GalaxySimulator {
 
 		let shaderProgram = gl.createProgram();
 		gl.attachShader(shaderProgram, vertexShader);
+		gl.deleteShader(vertexShader);
 		gl.attachShader(shaderProgram, fragmentShader);
+		gl.deleteShader(fragmentShader);
 		gl.linkProgram(shaderProgram);
 
 		if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
