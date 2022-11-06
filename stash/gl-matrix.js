@@ -5120,7 +5120,7 @@ function perspective(out, fovy, aspect, near, far) {
   out[7] = 0;
   out[8] = 0;
   out[9] = 0;
-  out[10] = (far + near) * nf;
+  out[10] = -(far + near) * nf;
   out[11] = -1;
   out[12] = 0;
   out[13] = 0;

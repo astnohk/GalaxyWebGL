@@ -40,7 +40,7 @@ class GalaxySimulator {
 		this.glBuffers = null;
 		this.programInfo = null;
 		this.zScale = 0.05;
-		this.pointSize = 2.0;
+		this.pointSize = 3.0;
 
 
 		this.cosmoSize = 800;
@@ -98,6 +98,7 @@ class GalaxySimulator {
 		    uniform mat4 uModelViewMatrix;
 		    uniform mat4 uProjectionMatrix;
 
+            out float pointSize;
 		    out lowp vec4 vColor;
 
 		    void main(void) {
@@ -111,11 +112,14 @@ class GalaxySimulator {
 		    `#version 300 es
 		    precision highp float;
 
+            in float pointSize;
 		    in lowp vec4 vColor;
 		    out vec4 fragmentColor;
 
 		    void main(void) {
-			    fragmentColor = vColor;
+                vec2 r = gl_PointCoord * 2.0 - vec2(1.0);
+                float c = 1.4143 / (1.0 + pow(6.0 * length(r), 1.5)); // Use over 1.0 coefficient to bring the center color close to WHITE
+			    fragmentColor = vec4(vColor.rgb, vColor.a * c);
 		    }
 		    `;
 
@@ -535,18 +539,33 @@ class GalaxySimulator {
 
 	makeColormap()
 	{
-		let dc = 255 / (this.colormapQuantize / 2);
+		let dc = 1.0 / (this.colormapQuantize / 2);
 		// Make colormap normal
 		for (let i = 0; i <= Math.floor(this.colormapQuantize / 2); i++) {
-			this.colormap.normal[i] = 'rgb(0,' + Math.min(255, Math.ceil(dc * i)) + ',' + Math.max(0, 255 - Math.ceil(dc * i)) + ')';
+            const r = 0.0;
+			const g = Math.min(1.0, Math.ceil(dc * i));
+            const b = Math.max(0, 1.0 - Math.ceil(dc * i));
+            //const norm = Math.sqrt(r * r + g * g + b * b);
+            const norm = Math.max(r, g, b);
+			this.colormap.normal[i] = `rgb(${Math.floor(255 * r / norm)},${Math.floor(255 * g / norm)},${Math.floor(255 * b / norm)})`;
 		}
 		for (let i = Math.floor(this.colormapQuantize / 2); i < this.colormapQuantize; i++) {
-			this.colormap.normal[i] = 'rgb(' + Math.min(255, Math.ceil(dc * (i - this.colormapQuantize / 2))) + ',' + Math.max(0, 255 - Math.ceil(dc * (i - this.colormapQuantize / 2))) + ',0)';
+			const r = dc * (i - this.colormapQuantize / 2);
+            const g = Math.max(0, 1.0 - Math.ceil(dc * (i - this.colormapQuantize / 2)));
+            const b = 0.0;
+            //const norm = Math.sqrt(r * r + g * g + b * b);
+            const norm = Math.max(r, g, b);
+			this.colormap.normal[i] = `rgb(${Math.floor(255 * r / norm)},${Math.floor(255 * g / norm)},${Math.floor(255 * b / norm)}`;
 		}
 		// Make colormap bluesea
-		dc = 255 / this.colormapQuantize;
+		dc = 1.0 / this.colormapQuantize;
 		for (let i = 0; i < this.colormapQuantize; i++) {
-			this.colormap.bluesea[i] = 'rgb(' + Math.min(255, Math.ceil(dc / 2 * i)) + ',' + Math.min(255, Math.ceil(dc * i)) + ',255)';
+			const r = Math.min(255, Math.ceil(dc / 2 * i));
+            const g = Math.min(255, Math.ceil(dc * i));
+            const b = 1.0;
+            //const norm = Math.sqrt(r * r + g * g + b * b);
+            const norm = Math.max(r, g, b);
+			this.colormap.bluesea[i] = `rgb(${Math.floor(255 * r / norm)},${Math.floor(255 * g / norm)},${Math.floor(255 * b / norm)}`;
 		}
 	}
 
@@ -568,6 +587,8 @@ class GalaxySimulator {
 		gl.clearDepth(1.0); // Clear everything
 		gl.enable(gl.DEPTH_TEST); // Enable depth testing
 		gl.depthFunc(gl.LEQUAL); // Near things obscure far things
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 		gl.clear(gl.COLOR_BUFFER_BIT | gl.DETPH_BUFFER_BIT);
 
 		let fieldOfView = 45 * Math.PI / 180.0;
