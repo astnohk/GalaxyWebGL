@@ -40,7 +40,6 @@ class GalaxySimulator {
 		this.glBuffers = null;
 		this.programInfo = null;
 		this.zScale = 0.05;
-		this.pointSize = 3.0;
 
 
 		this.cosmoSize = 800;
@@ -98,27 +97,25 @@ class GalaxySimulator {
 		    uniform mat4 uModelViewMatrix;
 		    uniform mat4 uProjectionMatrix;
 
-            out float pointSize;
 		    out lowp vec4 vColor;
 
 		    void main(void) {
 			    vec4 pos = uProjectionMatrix * uModelViewMatrix * aVertexPosition;
 			    gl_Position = pos;
-			    gl_PointSize = aPointSize / pos.w ;
-			    vColor = aVertexColor;
+			    gl_PointSize = aPointSize / pos.w;
+			    vColor = 0.4 * aVertexColor + vec4(vec3(0.6), 1.0);
 		    }
 		    `;
 		this.fsSource =
 		    `#version 300 es
 		    precision highp float;
 
-            in float pointSize;
 		    in lowp vec4 vColor;
 		    out vec4 fragmentColor;
 
 		    void main(void) {
                 vec2 r = gl_PointCoord * 2.0 - vec2(1.0);
-                float c = 1.4143 / (1.0 + pow(6.0 * length(r), 1.5)); // Use over 1.0 coefficient to bring the center color close to WHITE
+                float c = 1.4142 / (1.0 + pow(10.0 * length(r), 1.4142)); // Use over 1.0 coefficient to bring the center color close to WHITE
 			    fragmentColor = vec4(vColor.rgb, vColor.a * c);
 		    }
 		    `;
@@ -586,7 +583,8 @@ class GalaxySimulator {
 		gl.clearColor(0.0, 0.0, 0.0, 1.0); // Clear with black
 		gl.clearDepth(1.0); // Clear everything
 		gl.enable(gl.DEPTH_TEST); // Enable depth testing
-		gl.depthFunc(gl.LEQUAL); // Near things obscure far things
+		//gl.depthFunc(gl.LEQUAL); // Near things obscure far things
+		gl.depthFunc(gl.ALWAYS); // Draw every pixel independent of its depth
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 		gl.clear(gl.COLOR_BUFFER_BIT | gl.DETPH_BUFFER_BIT);
